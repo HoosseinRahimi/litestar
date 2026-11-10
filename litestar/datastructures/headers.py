@@ -464,8 +464,22 @@ class Accept:
         types = [MediaTypeHeader(t) for t in provided_types]
 
         for accepted in self._accepted_types:
+            # A quality of zero explicitly excludes this media range.
+            if accepted.priority[0] == 0:
+                continue
+
             for provided in types:
                 if provided.match(accepted):
+                    # A more-specific rejection takes precedence over an otherwise
+                    # acceptable wildcard range, regardless of its quality.
+                    if any(
+                        excluded.priority[0] == 0
+                        and excluded.priority[1] > accepted.priority[1]
+                        and provided.match(excluded)
+                        for excluded in self._accepted_types
+                    ):
+                        continue
+
                     # Return the accepted type with wildcards replaced
                     # by concrete parts from the provided type
                     result = copy(provided)
