@@ -376,6 +376,15 @@ def test_etag_to_header_weak() -> None:
         ("text/plain;q=0.8,text/html", ["text/plain", "text/html"], "text/html"),
         ("text/plain;q=ab,text/html", ["text/plain", "text/html"], "text/plain"),
         ("text/*,text/html", ["text/plain", "text/html"], "text/html"),
+        ("text/plain;q=0", ["text/plain"], None),
+        ("text/*;q=1,text/html;q=0", ["text/html"], None),
+        ("text/html;q=0,text/*;q=1", ["text/html"], None),
+        ("*/*;q=1,text/html;q=0", ["text/html"], None),
+        ("text/*;q=1,text/html;q=0", ["text/html", "text/plain"], "text/plain"),
+        ("text/html;q=0,text/*;q=1", ["text/plain", "text/html"], "text/plain"),
+        ("text/html;q=0.5,text/*;q=1", ["text/html"], "text/html"),
+        ("text/html;q=0,text/*;q=1", ["text/plain"], "text/plain"),
+        ("text/html;q=0", ["text/html"], None),
     ),
 )
 def test_accept_best_match(accept_value: str, provided_types: list[str], best_match: Optional[str]) -> None:
