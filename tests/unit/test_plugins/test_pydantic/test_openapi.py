@@ -608,3 +608,48 @@ def test_create_for_computed_field(prefer_alias: bool) -> None:
     assert property_two.description == "a description"
     assert property_two.title == "a title"
     assert property_two.read_only
+
+
+def test_field_metadata_does_not_leak_into_component_schema() -> None:
+    """Metadata declared on a field must not mutate the component schema of the field's type.
+
+    Regression test for https://github.com/litestar-org/litestar/issues/5121: when a model typed field carried
+    metadata, generating the containing model mutated the shared component of the field's type, which made the
+    produced spec depend on the order in which handlers were registered.
+    """
+
+    class Item(pydantic_v2.BaseModel):
+        id: int
+
+    class WrappedItem(pydantic_v2.BaseModel):
+        item: Item = pydantic_v2.Field(description="Item as a field, not as the model")
+
+    @get("/plain")
+    async def plain() -> Item:
+        return Item(id=1)
+
+    @get("/wrapped")
+    async def wrapped() -> WrappedItem:
+        return WrappedItem(item=Item(id=1))
+
+    generated: list[dict[str, Any]] = []
+
+    for handlers in ([plain, wrapped], [wrapped, plain]):
+        app = Litestar(
+            handlers,
+            openapi_config=OpenAPIConfig(title="test", version="1.0.0", create_examples=False),
+        )
+        schema = app.openapi_schema.to_schema()
+        generated.append(schema)
+
+        components = schema["components"]["schemas"]
+        item_key = next(key for key in components if key.rsplit(".", 1)[-1] == "Item")
+        wrapped_item_key = next(key for key in components if key.rsplit(".", 1)[-1] == "WrappedItem")
+
+        assert "description" not in components[item_key]
+        assert components[wrapped_item_key]["properties"]["item"] == {
+            "allOf": [{"$ref": f"#/components/schemas/{item_key}"}],
+            "description": "Item as a field, not as the model",
+        }
+
+    assert generated[0] == generated[1]

@@ -79,7 +79,13 @@ def test_request_body_schema_extra() -> None:
     app = Litestar([handler])
     schema = app.openapi_schema.to_schema()
     resp = next(iter(schema["components"]["schemas"].values()))
-    assert resp["title"] == "Overridden title"
+
+    # the component schema is shared, so the use-site override must not be applied to it
+    assert resp["title"] == "RequestBody"
+    assert (
+        schema["paths"]["/"]["post"]["requestBody"]["content"]["application/json"]["schema"]["title"]
+        == "Overridden title"
+    )
 
 
 def test_upload_single_file_schema_generation() -> None:

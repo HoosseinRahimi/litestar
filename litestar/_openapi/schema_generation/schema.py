@@ -311,6 +311,22 @@ class SchemaCreator:
             result = self.for_type_alias_type(field_definition)
         elif plugin_for_annotation := self.get_plugin_for(field_definition):
             result = self.for_plugin(field_definition, plugin_for_annotation)
+            if (
+                isinstance(result, Schema)
+                and (reference := self.schema_registry.get_reference_for_field_definition(field_definition)) is not None
+            ):
+                # The plugin has just registered this schema as a component. Metadata supplied at the use site
+                # (description, title, schema_extra, ...) describes this field only, so move it to a wrapper around
+                # the reference instead of mutating the shared component. Mutating it would leak the metadata into
+                # every other use of the same type and make the generated spec depend on handler order.
+                # Examples are left alone here: they were previously generated on the component, so generating them
+                # per use site would turn plain references into wrappers for every annotated model.
+                wrapper = Schema()
+                self._apply_field_metadata(field_definition, wrapper, include_examples=False)
+                if wrapper == Schema():
+                    return reference
+                wrapper.all_of = [reference]
+                return wrapper
         elif _should_create_literal_schema(field_definition):
             annotation = (
                 make_non_optional_union(field_definition.annotation)
@@ -660,7 +676,7 @@ class SchemaCreator:
                     if getattr(schema, schema_key, None) is None:
                         setattr(schema, schema_key, value)
 
-    def process_schema_result(self, field: FieldDefinition, schema: Schema) -> Schema | Reference:
+    def _apply_field_metadata(self, field: FieldDefinition, schema: Schema, *, include_examples: bool = True) -> None:
         if field.kwarg_definition and field.is_const and field.has_default and schema.const is None:
             schema.const = field.default
 
@@ -679,10 +695,13 @@ class SchemaCreator:
         if schema.default is None and field.default is not Empty:
             schema.default = field.default
 
-        if not schema.examples and self.generate_examples:
+        if include_examples and not schema.examples and self.generate_examples:
             from litestar._openapi.schema_generation.examples import create_examples_for_field
 
             schema.examples = get_json_schema_formatted_examples(create_examples_for_field(field))
+
+    def process_schema_result(self, field: FieldDefinition, schema: Schema) -> Schema | Reference:
+        self._apply_field_metadata(field, schema)
 
         if schema.title and schema.type == OpenAPIType.OBJECT:
             return self.schema_registry.get_reference_for_field_definition(field) or schema
